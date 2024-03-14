@@ -1,0 +1,1111 @@
+---
+title: "LSC Assignment"
+output:
+  pdf_document: default
+date: "2024-03-09"
+---
+
+```{r setup, include=FALSE}
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+```
+
+## 1. PRE-PROCESSING OF THE DATA
+
+I have taken the approach to divide the dataset into two parts and then joining the tables. One with the menuitem and the recipes and the other one with menuitem and the subrecipes.
+
+```{r}
+#Loading csv files for Set 1
+menuitem_df <- read.csv('/Users/sanyamjain/Downloads/menuitem.csv')
+menu_items_df <- read.csv('/Users/sanyamjain/Downloads/menu_items.csv')
+recipes_df <- read.csv('/Users/sanyamjain/Downloads/recipes.csv')
+recipe_ingredient_assignments_df <- read.csv('/Users/sanyamjain/Downloads/recipe_ingredient_assignments.csv')
+ingredients_df <- read.csv('/Users/sanyamjain/Downloads/ingredients.csv')
+portion_uom_types_df <- read.csv('/Users/sanyamjain/Downloads/portion_uom_types.csv')
+
+#Loading csv files for Set 2
+sub_recipes_ingr_assignments_df <- read.csv('/Users/sanyamjain/Downloads/sub_recipe_ingr_assignments.csv')
+sub_recipes_df <- read.csv('/Users/sanyamjain/Downloads/sub_recipes.csv')
+recipe_sub_recipe_assignments_df <- read.csv('/Users/sanyamjain/Downloads/recipe_sub_recipe_assignments.csv')
+```
+
+Joining Set 1
+
+```{r}
+# Filter the ingredients for lettuce and lettuce with metric unit
+lettuce_ingredients_df <- ingredients_df %>%
+  filter(grepl("Lettuce", IngredientName, ignore.case = TRUE) | 
+         grepl("Lettuce - Metric", IngredientName, ignore.case = TRUE))
+```
+
+```{r}
+# Join lettuce ingredients with recipe ingredient assignments
+lettuce_recipes_df <- lettuce_ingredients_df %>%
+  inner_join(recipe_ingredient_assignments_df, by = "IngredientId")
+```
+
+```{r}
+# Join with recipes
+lettuce_recipes_df <- lettuce_recipes_df %>%
+  inner_join(recipes_df, by = "RecipeId")
+```
+
+```{r}
+# Join with menu items (assume we join using RecipeId which should be common)
+lettuce_menu_items_df <- lettuce_recipes_df %>%
+  inner_join(menu_items_df, by = "RecipeId")
+```
+
+```{r}
+# Finally, join with menuitem (which contains the transaction details)
+lettuce_sales_df <- lettuce_menu_items_df %>%
+  inner_join(menuitem_df, by = c("PLU" = "PLU", "MenuItemId" = "Id"))
+```
+
+
+```{r}
+#Converting the lettuce measured in grams to ounces
+lettuce_sales_df$Quantity.y = ifelse(lettuce_sales_df$PortionUOMTypeId == 13,lettuce_sales_df$Quantity.y/28.3495 ,lettuce_sales_df$Quantity.y) 
+```
+
+```{r}
+#Multiplying both the quantities (order size and lettuce use in a recipe)
+lettuce_sales_df$lettucequant = lettuce_sales_df$Quantity.x * lettuce_sales_df$Quantity.y 
+```
+
+```{r}
+#Grouping by date now, i.e. calculating daily consumption
+date_grouped_lettuce <- lettuce_sales_df %>% 
+  group_by(date) %>% 
+  summarize(total_value = sum(lettucequant), row_count = n())
+head(date_grouped_lettuce)
+```
+
+#Joining the sub recipe table set now
+
+```{r}
+# Join lettuce ingredients with sub_recipes_ingr_assignments
+lettuce_subrecipe_ingredients_df <- lettuce_ingredients_df %>%
+  inner_join(sub_recipes_ingr_assignments_df, by = "IngredientId")
+```
+
+```{r}
+# Join with sub_recipes
+lettuce_subrecipes_df <- lettuce_subrecipe_ingredients_df %>%
+  inner_join(sub_recipes_df, by = "SubRecipeId")
+```
+```{r}
+# Join with recipe_sub_recipe_assignments
+lettuce_recipe_subrecipe_assign_df <- lettuce_subrecipes_df %>%
+  inner_join(recipe_sub_recipe_assignments_df, by = "SubRecipeId")
+```
+
+```{r}
+# Join with recipes
+lettuce_recipes2 <- lettuce_recipe_subrecipe_assign_df %>%
+  inner_join(recipes_df, by = "RecipeId")
+```
+
+```{r}
+#Join with menuitems
+lettuce_menuitems2 <- lettuce_recipes2 %>%
+  inner_join(menu_items_df, by = "RecipeId")
+```
+
+```{r}
+# Finally join with menuitem
+lettuce_subrecipe_sales <- lettuce_menuitems2 %>%
+  inner_join(menuitem_df, by = c("PLU" = "PLU", "MenuItemId" = "Id"))
+```
+
+```{r}
+#Again, converting grams into ounces
+lettuce_subrecipe_sales$Quantity.y = ifelse(lettuce_subrecipe_sales$PortionUOMTypeId == 13,lettuce_subrecipe_sales$Quantity.y/28.3495 ,lettuce_subrecipe_sales$Quantity.y)
+```
+
+
+```{r}
+#Like before we multiply the order size quantity (quantity.x) with lettuce quantity used in recipe (quantity.y) and the lettuce quantity used in subrecipe(factor)
+lettuce_subrecipe_sales$lettucequant = lettuce_subrecipe_sales$Quantity.x * lettuce_subrecipe_sales$Quantity.y * lettuce_subrecipe_sales$Factor
+```
+
+```{r}
+#Grouping by date so we get the daily data
+date_grouped_sub_lettuce <- lettuce_subrecipe_sales %>%
+  group_by(date) %>%
+  summarize(total_value = sum(lettucequant), row_count = n())
+head(date_grouped_sub_lettuce)
+```
+
+```{r}
+#TOTAL DAILY CONSUMPTION AFTER JOINING THE TWO SETS OF TABLES
+daily_total_lettuce <- left_join(date_grouped_sub_lettuce, date_grouped_lettuce, by = 'date')
+head(daily_total_lettuce)
+```
+
+```{r}
+#Since we have some NA values in the table, we make sure that we replace that by 0 for easy analyis of the data
+daily_total_lettuce$total_value.y = ifelse(is.na(daily_total_lettuce$total_value.y), 0, daily_total_lettuce$total_value.y) 
+daily_total_lettuce$total_value.x = ifelse(is.na(daily_total_lettuce$total_value.x), 0, daily_total_lettuce$total_value.x)
+daily_total_lettuce$total_value = daily_total_lettuce$total_value.x + daily_total_lettuce$total_value.y 
+daily_total_lettuce
+```
+
+```{r}
+
+# Creating a function for getting the data for each store by joining the two sets of tables again
+
+filter_store <- function(store){
+    daily_consumption_lettuce <- lettuce_sales_df %>% 
+      filter(StoreNumber == store) %>% 
+      group_by(date) %>% 
+      summarize(total_value = sum(lettucequant), row_count = n())
+    daily_consumption_lettuce
+    
+    daily_consumption_lettuce_sub <- lettuce_subrecipe_sales %>%
+      filter(StoreNumber == store) %>%
+      group_by(date) %>%
+      summarize(total_value = sum(lettucequant), row_count = n())
+    daily_consumption_lettuce_sub
+    
+    daily <- left_join(daily_consumption_lettuce_sub, daily_consumption_lettuce, by = 'date')
+    daily$total_value.y = ifelse(is.na(daily$total_value.y), 0, daily$total_value.y)
+    daily$total_value.x = ifelse(is.na(daily$total_value.x), 0, daily$total_value.x)
+    
+    #Adding both the columns to obtain the total value
+    daily$total_value = daily$total_value.x + daily$total_value.y 
+    return (daily %>% select(c(date,total_value)))
+}
+```
+
+```{r}
+#Applying the function to each store to get the data. Upon verifying with the first few observations provided. It matched for the given store.
+store_1 <- filter_store(46673)
+store_2 <- filter_store(4904)
+store_3 <- filter_store(12631)
+store_4 <- filter_store(20974)
+```
+
+```{r}
+#Checking the number of rows for each store.
+nrow(store_1)
+nrow(store_2)
+nrow(store_3)
+nrow(store_4)
+```
+# ARIMA and HW Forecasting
+
+## FORECASTING USING ARIMA MODEL (STORE 1)
+
+```{r}
+library(ggplot2)
+library(tseries)
+library(forecast)
+```
+
+
+First, let's start with store 1. I have plotted the overall time series chart to see the overall trend of the time series to detect if there are any significant patterns or not. I have formatted the date to ensure it's suitable for time series analysis. Plotting the initial data helps visualize trends, seasonality, or any anomalies that might exist.
+
+```{r}
+data <- data.frame(
+  date = as.Date(store_1$date,  format = "%y-%m-%d"),
+  lettuce = store_1$total_value
+)
+breaks <- seq(min(data$date), max(data$date), by = "7 days")
+
+ggplot(data, aes(x = date, y = lettuce)) +
+  geom_line() +
+  labs(title = "Time Series Chart",
+       x = "Date",
+       y = "Lettuce Consumption")%>%
+  print() + 
+  geom_vline(xintercept = as.numeric(breaks), color = "blue", linetype = "dashed")
+
+```
+
+Decomposition of Time Series - I decomposed the time series to understand its underlying components: trend, seasonality, and the remainder. This decomposition aids in identifying the type of transformations or differencing needed to stabilize the mean and variance.
+
+```{r}
+data <- ts(data[,2], frequency = 7, start = c(1,1))
+data %>% stl(s.window = 'period') %>% autoplot
+```
+
+- After plotting the decomposition chart of the time series, it was found that the store 1 had NO trend factor, however, there seems to be some seasonal factor which can be determined by the length of the grey bar. 
+- To verify this, I ran the stationery tests such as the adf, pp and kpss test to check the d value. These tests will help determine the presence of unit roots, indicating whether differencing is needed to achieve stationarity. Moreover, to determine the number of first differences required, I ran the ndiffs and nsdiffs function. 
+
+- Before doing this, I segmented the data into training and test sets to ensure the model's robustness and generalizability. The data for every store has been divided into 80% for the training set and 20% into the test set.
+
+```{r}
+# divide the dataset into training and test dataset now to see and evaluate the performance of different models.
+
+data.train <- window(data, end = c(12,7))
+data.test <- window(data, start = c(13,1))
+```
+
+```{r}
+#Running the stationery tests on the training data
+adf.test(data.train)
+pp.test(data.train)
+kpss.test(data.train)
+
+#Running the ndiffs and nsdiffs function to find out the differencing order
+ndiffs(data)
+nsdiffs(data)
+```
+
+- The ADF test checks for the presence of a unit root in the time series. A more negative test statistic suggests stronger evidence against the null hypothesis of a unit root (i.e., the series is non-stationary). Here, the test statistic is -7.5801, and the p-value is 0.01, which is less than a significance level of 0.05. This result indicates that we can reject the null hypothesis of a unit root, suggesting that the series is stationary.
+
+- The PP test adjusts for any serial correlation and heteroskedasticity in the series. Like the ADF test, a smaller p-value indicates evidence against the null hypothesis of a unit root. With a p-value of 0.01, this test also suggests that the series is stationary.
+
+- As for the KPSS test, it has a null hypothesis that is the opposite of the ADF and PP tests: it assumes the series is stationary. A high p-value (e.g., greater than 0.05 or 0.10) means there is not enough evidence to reject the null hypothesis, so the series can be considered stationary. The KPSS result with a p-value of 0.1 suggests stationarity, consistent with the ADF and PP test results.
+
+- The ndiffs indicates that no differencing (0 differences) is necessary to make the series stationary for the ARIMA model. This aligns with the stationarity test results, suggesting that the series is already stationary.
+
+- As expected, the nsdiffs result indicates that one seasonal difference is indeed necessary to make the series stationary on a seasonal basis. Even though the original series is stationary, it may still exhibit seasonal patterns that require differencing. Hence, we will apply the first order differencing now to eliminate seasonal factor.
+
+
+```{r}
+#First order differencing to eliminate seasonality.
+data.sdiff1 <- diff(data.train, lag = 7, differences = 1)
+autoplot(data.sdiff1)
+data.sdiff1 %>% stl(s.window = 'period') %>% autoplot
+```
+
+After eliminating the seasonality difference, it is further verified by running ndiffs and nsdiffs function that no further differencing is required in the stationery time series.
+
+```{r}
+ndiffs(data.sdiff1)
+nsdiffs(data.sdiff1)
+```
+
+To help forecast the data, the acf and pacf plots have been plotted to help identify potential AR or MA components by observing autocorrelation in the differenced series. This will help us in deciding the p,d,q parameters for the forecasting model.
+
+```{r}
+acf(data.sdiff1, lag.max=23)
+```
+
+ACF - The acf plot suggest that there are significant lags at lag 7 and at lag 11. However, we should also check for any auttocorrelation using the pacf function.
+
+```{r}
+pacf(data.sdiff1, lag.max=23)
+```
+
+PACF - The PACF function suggests that there are significant lags at lag 6 and lag 14. However, to further decide on the selection of the model, we have to run the auto arima function to find the best fit model.
+
+```{r}
+#Using the auto.arima function to find the best model
+auto.arima(data.train,D=1, trace = TRUE)
+```
+
+Interpreting the results of the auto ARIMA function:
+
+- According to the results obtained from auto.arima, the lowest AICc is 730.08 and sigma^2 as 683.7. 
+- The (p,d,q) is (0,0,1) and (P,D,Q) is (0,1,1) with 7 lags. To further verify this, we will select one more candidate model which has the closest AICc i.e. 730.107 with (p,d,q) being (1,0,0) and (P,D,Q) being (0,1,1). We will further train the data and test its accuracy on the test data.
+- To further ensure that the model is the best selected one, we can also conduct the residual analysis to make sure the residuals are random.
+
+```{r}
+#Training on the candidate models
+store1_model1 <- arima(data.train, order = c(1, 0, 0), seasonal = c(0,1,1))
+store1_model2 <- arima(data.train, order = c(0, 0, 1), seasonal = c(0,1,1))
+```
+
+
+```{r}
+# residual analysis
+checkresiduals(store1_model1)
+checkresiduals(store1_model2)
+```
+
+Observation from the residual analysis:
+
+- The residuals for both the models appear to be randomly scattered around the zero line, which suggests that there's no obvious trend or seasonality left in the residuals. This suggests that the model has captured the main structure of the time series data. However, since the residuals of both the models are scattered randomly and we still need to decide on the best model, we will take into account the accuracy of the same.
+
+```{r}
+## Evaluating the model on test data and checking the accuracy of the same.
+store1_ar_forecast1 <- forecast(store1_model1, h = length(data.test))
+store1_ar_forecast2 <- forecast(store1_model2, h = length(data.test))
+print(accuracy(store1_ar_forecast1, data.test))
+print(accuracy(store1_ar_forecast2, data.test))
+```
+Observation:
+
+- The accuracy results show that model 1 has an MAE of 29.41, RMSE of 40.22 and MAPE of 19.97. On the other hand, model 2 has an MAE of 29.51, RMSE of 40.33 and MAPE of 20.02. The model with the lower MAE is typically considered better at forecasting with less error on average and so is the case with RMSE and MAPE. 
+- Since, all these three metrics are better performing for model 1, we can finally say that model 1 is the best fitted on the test data. We will now do our forecasting based on model 1 and plot the time series graph for the same. The graph forecasts the amount of lettuce for the next two weeks and is highlighted by blue color.
+
+```{r}
+store1_final_forecast <- forecast(store1_model1, h = 14)
+autoplot(store1_final_forecast) + geom_vline(xintercept = seq(1,20,1), color = "blue", linetype = "dashed")
+```
+
+
+```{r}
+#Getting the final forecast numbers for the next two week for store 1
+store1_final_forecast
+```
+
+# FORECASTING USING HOLT WINTERS MODEL (STORE 1)
+
+For the forecasting using holt winters method, we will use the ets function which automatically selects the best error, trend, and seasonality (ETS) model based on the data provided. I have provided a model call using the 'ZZZ' argument allowing it to automatically select the type of error, trend and seasonality.
+
+```{r}
+#Training the model on the train data
+store1_holtwinter <- ets(data.train, model = "ZZZ")
+print(store1_holtwinter)
+```
+
+Observation:
+
+- The trained is an ANA model with additive error, no trend and additive seasonality. 
+- Alpha in this case 0.1033 is the smoothing parameter for the level of the series. It's relatively close to 0, which suggests that the model puts more weight on past observations rather than more recent ones when estimating the level.
+The AICc of the model is 923.68 and the BIC is 944.98. 
+- Just like the ARIMA model, we will further check the residuals to ensure they are randomly scattered.
+
+```{r}
+checkresiduals(store1_holtwinter)
+```
+
+- Observation: As per the expectations, the residuals are randomly scattered around the 0 line.
+- We will proceed with forecasting the time series based on this best fitted ets model.
+
+```{r}
+store1_holtwinter_forecast1 <- forecast(store1_holtwinter, h = length(data.test))
+```
+
+```{r}
+print(accuracy(store1_holtwinter_forecast1, data.test))
+```
+
+- The accuracy results show that ets model has an MAE of 15.49, RMSE of 35.85 and MAPE of 17.23.
+
+```{r}
+# Training the selected model on the entire dataset
+store1_holt_final <- ets(data, model = "ZZZ")
+print(store1_holt_final)
+```
+
+Observation: The final trained model is an MNA model having AICc as 1165.435
+
+```{r}
+#Making sure that the residuals are radnomly scattered
+checkresiduals(store1_holt_final)
+```
+
+
+```{r}
+store1_hw_forecast <- forecast(store1_holt_final, h = 14)
+print(store1_hw_forecast)
+```
+
+```{r}
+autoplot(store1_hw_forecast) + geom_vline(xintercept = seq(1,20,1), color = "blue", linetype = "dashed")
+```
+
+### Comparision of the models:
+
+- According to the results of the arima model, the accuracy results showed that the final model selected for arima has an MAE of 29.41, RMSE of 40.22 and MAPE of 19.97.
+- On the other hand, the ets model has an MAE of 15.49, RMSE of 35.85 and MAPE of 17.23.
+- RMSE measures the average magnitude of errors between predicted and actual values. For the comparision between the models, I will make the decision based on the fact that large errors are particularly undesirable in the use case i.e. lettuce consumption and RMSE can highlight these issues.
+- Since, the ets model has a lower RMSE i.e. 35.85 than the arima RMSE, i.e. 40.22, I will choose the ets model for this store for my forecast.
+
+
+#--------------------------------------------------------------------
+
+# FORECASTING USING ARIMA MODEL (STORE 2)
+
+First, let's apply the same techniques to store 2. I have plotted the overall time series chart to see the overall trend.
+
+```{r}
+data <- data.frame(
+  date = as.Date(store_2$date,  format = "%y-%m-%d"),
+  lettuce = store_2$total_value
+)
+breaks <- seq(min(data$date), max(data$date), by = "7 days")
+
+ggplot(data, aes(x = date, y = lettuce)) +
+  geom_line() +
+  labs(title = "Time Series Chart",
+       x = "Date",
+       y = "Lettuce Consumption")%>%
+  print() + 
+  geom_vline(xintercept = as.numeric(breaks), color = "blue", linetype = "dashed")
+
+```
+
+## Decomposition of Time Series
+
+```{r}
+data <- ts(data[,2], frequency = 7, start = c(1,1))
+data %>% stl(s.window = 'period') %>% autoplot
+```
+
+- After plotting the decomposition chart of the time series, it was found that the store 2 had NO trend factor, however, there seems to be some indicative seasonal factor which can be determined by the length of the grey bar. 
+- To verify this, I ran the stationery tests such as the adf, pp and kpss test to check the D value. These tests will help determine the presence of unit roots, indicating whether differencing is needed to achieve stationarity. Moreover, to determine the number of first differences required, I ran the ndiffs and nsdiffs function. 
+- Before doing this, I segmented the data into training and test sets to ensure the model's robustness and generalizability. The data for every store has been divided into 80% for the training set and 20% into the test set.
+
+```{r}
+#Dividing the dataset into training and test
+data.train <- window(data, end = c(11,7)) #store 2 (Again splitting by 80%)
+data.test <- window(data, start = c(12,1)) #store 2
+```
+
+```{r}
+adf.test(data.train)
+pp.test(data.train)
+kpss.test(data.train)
+ndiffs(data)
+nsdiffs(data)
+```
+
+- The ADF test checks for the presence of a unit root in the time series. A more negative test statistic suggests stronger evidence against the null hypothesis of a unit root (i.e., the series is non-stationary). Here, the test statistic is -5.0615, and the p-value is 0.01, which is less than a significance level of 0.05. This result indicates that we can reject the null hypothesis of a unit root, suggesting that the series is stationary.
+
+- The PP test adjusts for any serial correlation and heteroskedasticity in the series. The value in this case is -41.045. Like the ADF test, a smaller p-value indicates evidence against the null hypothesis of a unit root. With a p-value of 0.01, this test also suggests that the series is stationary.
+
+- As for the KPSS test, it has a null hypothesis that is the opposite of the ADF and PP tests: it assumes the series is stationary. A high p-value (e.g., greater than 0.05 or 0.10) means there is not enough evidence to reject the null hypothesis, so the series can be considered stationary. The KPSS result with a p-value of 0.1 suggests stationarity, consistent with the ADF and PP test results.
+
+- The ndiffs indicates that no differencing (0 differences) is necessary to make the series stationary for the ARIMA model. This aligns with the stationarity test results, suggesting that the series is already stationary.
+
+- Strikingly, the nsdiffs result indicates that 1 seasonal difference is indeed necessary to make the series stationary on a seasonal basis. Even though the original series is stationary, it may still exhibit seasonal patterns that require differencing. Hence, we will apply the first order differencing now to eliminate seasonal factor.
+
+```{r}
+data.sdiff1 <- diff(data.train, lag = 7, differences = 1)
+autoplot(data.sdiff1)
+data.sdiff1 %>% stl(s.window = 'period') %>% autoplot
+```
+- After differencing the seasonality factor, the grey bar is larger indicating that the seasonal factor is of the least importance however, there seems to exist a large variation in the model due to the trend factor. 
+- To further check whether we need to do the differencing based on trend, I confirmed by checking through the ndiffs and nsdiffs function again. The ndiffs now came out to be 1 but the nsdiffs was now 0. Now let's remove the trend factor as well.
+
+```{r}
+ndiffs(data.sdiff1)
+nsdiffs(data.sdiff1)
+```
+
+```{r}
+data.diff1 <- diff(data.sdiff1, lag = 1, differences = 1)
+autoplot(data.diff1)
+data.diff1 %>% stl(s.window = 'period') %>% autoplot
+```
+Let's do the stationery tests again. Upon doing the tests again we can verify that we don't need any more differencing.
+
+```{r}
+adf.test(data.diff1)
+pp.test(data.diff1)
+kpss.test(data.diff1)
+ndiffs(data.diff1)
+nsdiffs(data.diff1)
+
+```
+
+Plotting the acf and pacf function again
+
+```{r}
+acf(data.sdiff1, lag.max=23)
+```
+
+- Lag 7 is a bit significant
+
+
+```{r}
+pacf(data.sdiff1, lag.max=23)
+```
+
+- Lag 7 and Lag 12 are significant
+
+```{r}
+#using the auto arima function
+auto.arima(data.train,D=1, trace = TRUE)
+```
+
+Interpreting the results of the auto ARIMA function:
+
+- According to the results obtained from auto.arima, the lowest AICc is 736.25 and sigma^2 as 2215. 
+- The (p,d,q) is (0,1,1) and (P,D,Q) is (0,1,1) with 7 lags. To further verify this, we will select one more candidate model which has the closest AICc i.e. 737.78 with (p,d,q) being (0,1,1) and (P,D,Q) being (1,1,1). We will further train the data and test its accuracy on the test data.
+- To further ensure that the model is the best selected one, we can also conduct the residual analysis to make sure the residuals are random.
+
+
+```{r}
+store2_model1 <- arima(data.train, order = c(0, 1, 1), seasonal = c(0,1,1))
+store2_model2 <- arima(data.train, order = c(0, 1, 1), seasonal = c(1,1,1))
+```
+
+```{r}
+# residual analysis
+checkresiduals(store2_model1)
+checkresiduals(store2_model2)
+```
+Observation from the residual analysis:
+
+- The residuals for both the models appear to be randomly scattered around the zero line.
+
+```{r}
+## Evaluating the model on test data and checking the accuracy of the same.
+store2_ar_forecast1 <- forecast(store2_model1, h = length(data.test))
+store2_ar_forecast2 <- forecast(store2_model2, h = length(data.test))
+print(accuracy(store2_ar_forecast1, data.test))
+print(accuracy(store2_ar_forecast2, data.test))
+```
+Observation:
+
+- The accuracy results show that model 1 has an MAE of 80.13, RMSE of 98.87 and MAPE of 24.96. On the other hand, model 2 has an MAE of 67.08, RMSE of 85.34 and MAPE of 20.90. The model with the lower MAE is typically considered better at forecasting with less error on average and so is the case with RMSE and MAPE. 
+- Since, all these three metrics are better performing for model 2, we can finally say that model 2 is the best fitted on the test data. We will now do our forecasting based on model 2 and plot the time series graph for the same. The graph forecasts the amount of lettuce for the next two weeks and is highlighted by blue color.
+
+```{r}
+store2_arima_fm <- arima(data, order = c(0, 1, 1), seasonal = c(1,1,1))
+store2_final_forecast <- forecast(store2_arima_fm, h = 14)
+autoplot(store2_final_forecast) + geom_vline(xintercept = seq(1,18,1), color = "blue", linetype = "dashed")
+```
+
+
+```{r}
+#Getting the final forecast numbers for the next two week for store 2
+store2_final_forecast
+```
+
+# FORECASTING USING HOLT WINTERS MODEL (STORE 2)
+
+I have provided a model call using the 'ZZZ' argument allowing it to automatically select the type of error, trend and seasonality.
+
+```{r}
+store2_holtwinter <- ets(data.train, model = "ZZZ")
+print(store2_holtwinter)
+```
+
+Observation:
+
+- The trained is an ANA model with additive error, no trend and additive seasonality. 
+- Alpha in this case 0.1964 is the smoothing parameter for the level of the series. It's relatively close to 0, which suggests that the model puts more weight on past observations rather than more recent ones when estimating the level.
+The AICc of the model is 929.94 and the BIC is 950.04. 
+- Just like the ARIMA model, we will further check the residuals to ensure they are randomly scattered.
+
+```{r}
+checkresiduals(store2_holtwinter)
+```
+- Observation: As per the expectations, the residuals are randomly scattered around the 0 line.
+- We will proceed with forecasting the time series based on this best fitted ets model.
+
+
+```{r}
+store2_holtwinter_forecast1 <- forecast(store2_holtwinter, h = length(data.test))
+```
+
+```{r}
+print(accuracy(store2_holtwinter_forecast1, data.test))
+```
+
+- The accuracy results show that ets model has an MAE of 47.71, RMSE of 59.64 and MAPE of 15.24.
+
+
+```{r}
+# Training the selected model on the entire dataset
+store2_holt_final <- ets(data, model = "ZZZ")
+print(store2_holt_final)
+```
+Observation: The final trained model is an ANA model having AICc as 1166.257
+
+```{r}
+#Making sure that the residuals are radnomly scattered
+checkresiduals(store2_holt_final)
+```
+
+
+```{r}
+store2_hw_forecast <- forecast(store2_holt_final, h = 14)
+print(store2_hw_forecast)
+```
+
+```{r}
+autoplot(store2_hw_forecast) + geom_vline(xintercept = seq(1,20,1), color = "blue", linetype = "dashed")
+```
+
+### Comparision of the models:
+
+- According to the results of the arima model, the accuracy results showed that the final model selected for arima has an MAE of 67.08, RMSE of 85.34 and MAPE of 20.90.
+- On the other hand, the ets model has an MAE of 47.71, RMSE of 59.64 and MAPE of 15.24.
+- RMSE measures the average magnitude of errors between predicted and actual values. For the comparision between the models, I will make the decision based on the fact that large errors are particularly undesirable in the use case i.e. lettuce consumption and RMSE can highlight these issues.
+- Since, the ets model has a lower RMSE i.e. 59.64 than the arima RMSE, i.e. 85.34, I will choose the ets model for this store for my forecast.
+
+
+#------------------------------------------------------------------------------
+
+# FORECASTING USING ARIMA MODEL (STORE 3)
+
+I have plotted the overall time series chart to see the overall trend of the time series to detect if there are any significant patterns or not.
+
+```{r}
+data <- data.frame(
+  date = as.Date(store_3$date,  format = "%y-%m-%d"),
+  lettuce = store_3$total_value
+)
+breaks <- seq(min(data$date), max(data$date), by = "7 days")
+
+ggplot(data, aes(x = date, y = lettuce)) +
+  geom_line() +
+  labs(title = "Time Series Chart",
+       x = "Date",
+       y = "Lettuce Consumption")%>%
+  print() + 
+  geom_vline(xintercept = as.numeric(breaks), color = "blue", linetype = "dashed")
+
+```
+
+I decomposed the time series to understand its underlying components: trend, seasonality, and the remainder.
+
+```{r}
+data <- ts(data[,2], frequency = 7, start = c(1,1))
+data %>% stl(s.window = 'period') %>% autoplot
+```
+
+- After plotting the decomposition chart of the time series, it was found that the store 3 had NO seasonal factor, however, there seems to be some trend factor which can be determined by the length of the grey bar. 
+- To verify this, I ran the stationery tests such as the adf, pp and kpss test to check the d value. These tests will help determine the presence of unit roots, indicating whether differencing is needed to achieve stationarity. Moreover, to determine the number of first differences required, I ran the ndiffs and nsdiffs function. 
+- Before doing this, I segmented the data into training and test sets to ensure the model's robustness and generalizability. The data for every store has been divided into 80% for the training set and 20% into the test set.
+
+```{r}
+data.train <- window(data, end = c(12,7)) #store 3 (Again splitting by 80%)
+data.test <- window(data, start = c(13,1)) #store 3
+```
+
+```{r}
+adf.test(data.train)
+pp.test(data.train)
+kpss.test(data.train)
+ndiffs(data)
+nsdiffs(data)
+```
+- The ADF test checks for the presence of a unit root in the time series. A more negative test statistic suggests stronger evidence against the null hypothesis of a unit root (i.e., the series is non-stationary). Here, the test statistic is -4.1676, and the p-value is 0.01, which is less than a significance level of 0.05. This result indicates that we can reject the null hypothesis of a unit root, suggesting that the series is stationary.
+
+- The PP test adjusts for any serial correlation and heteroskedasticity in the series. Like the ADF test, a smaller p-value indicates evidence against the null hypothesis of a unit root. With a p-value of 0.01, this test also suggests that the series is stationary.
+
+- As for the KPSS test, it has a null hypothesis that is the opposite of the ADF and PP tests: it assumes the series is stationary. A high p-value (e.g., greater than 0.05 or 0.10) means there is not enough evidence to reject the null hypothesis, so the series can be considered stationary. The KPSS result with a p-value of 0.1 suggests stationarity, consistent with the ADF and PP test results.
+
+- As expected, the ndiffs result indicates that one trend difference is indeed necessary to make the series stationary on a trend basis. Even though the original series is stationary, it may still exhibit trend patterns that require differencing. Hence, we will apply the first order differencing now to eliminate trend factor.
+
+- The nsdiffs indicates that no seasonal differencing (0 differences) is necessary to make the series stationary for the ARIMA model. This aligns with the stationarity test results, suggesting that the series is already stationary.
+
+
+```{r}
+#First order differencing to eliminate trend.
+data.diff1 <- diff(data.train, lag = 1, differences = 1)
+autoplot(data.diff1)
+data.diff1 %>% stl(s.window = 'period') %>% autoplot
+```
+After differencing the trend factor, the grey bar is larger indicating that the it is of the least importance however, there seems to exist a large variation in the model due to the seasonal factor now. To further check whether we need to do the differencing based on season, I confirmed by checking through the ndiffs and nsdiffs function again and both came out to be 0.
+```{r}
+adf.test(data.diff1)
+pp.test(data.diff1)
+kpss.test(data.diff1)
+ndiffs(data.diff1)
+nsdiffs(data.diff1)
+```
+
+We observe that there seems to be no need of the differencing however, the graph suggests otherwise.
+
+```{r}
+data.sdiff1 <- diff(data.diff1, lag = 7, differences = 1)
+autoplot(data.sdiff1)
+data.sdiff1 %>% stl(s.window = 'period') %>% autoplot
+```
+Let's do the stationery tests again. Upon doing the tests again we can verify that we don't need any more differencing.
+
+```{r}
+adf.test(data.diff1)
+pp.test(data.diff1)
+kpss.test(data.diff1)
+ndiffs(data.diff1)
+nsdiffs(data.diff1)
+
+```
+
+Now let's plot the acf and pacf of the model
+
+```{r}
+acf(data.diff1, lag.max=23)
+```
+
+ACF - The acf plot suggest that there are significant lags at lag 1 and at lag 7 and 21. However, we should also check for any auttocorrelation using the pacf function.
+
+```{r}
+pacf(data.diff1, lag.max=23)
+```
+
+PACF - The PACF function suggests that there are significant lags at lag 0,4,5. However, to further decide on the selection of the model, we have to run the auto arima function to find the best fit model.
+
+```{r}
+#Using the auto.arima function to find the best model
+auto.arima(data.train,d=1, trace = TRUE)
+```
+
+Interpreting the results of the auto ARIMA function:
+
+- According to the results obtained from auto.arima, the lowest AICc is 855.66 and sigma^2 as 1586. 
+- The (p,d,q) is (0,1,1) and (P,D,Q) is (2,0,0) with 7 lags. To further verify this, we will select one more candidate model which has the closest AICc i.e. 857.78 with (p,d,q) being (0,1,1) and (P,D,Q) being (1,0,0). We will further train the data and test its accuracy on the test data.
+- To further ensure that the model is the best selected one, we can also conduct the residual analysis to make sure the residuals are random.
+
+
+But before that let's build another model both with d=1 and D=1
+
+```{r}
+auto.arima(data.train,d=1,D=1, trace = TRUE)
+```
+
+Interpreting the results of the auto ARIMA function:
+
+- According to the results obtained from auto.arima, the lowest AICc is 786.71 and sigma^2 as 1442. 
+- The (p,d,q) is (0,1,1) and (P,D,Q) is (0,1,1) with 7 lags. To further verify this, we will select one more candidate model which has the closest AICc i.e. 788.71 with (p,d,q) being (1,1,1) and (P,D,Q) being (0,1,1). We will further train the data and test its accuracy on the test data.
+- To further ensure that the model is the best selected one, we can also conduct the residual analysis to make sure the residuals are random.
+
+
+```{r}
+store3_tmodel1 <- arima(data.train, order = c(0, 1, 1), seasonal = c(2,0,0))
+store3_tmodel2 <- arima(data.train, order = c(0, 1, 1), seasonal = c(1,0,0))
+store3_tsmodel1 <- arima(data.train, order = c(0, 1, 1), seasonal = c(0,1,1))
+store3_tsmodel2 <- arima(data.train, order = c(1, 1, 1), seasonal = c(0,1,1))
+```
+
+```{r}
+checkresiduals(store3_tmodel1)
+checkresiduals(store3_tmodel2)
+checkresiduals(store3_tsmodel1)
+checkresiduals(store3_tsmodel2)
+```
+Observation from the residual analysis:
+
+- The residuals for both the models appear to be randomly scattered around the zero line, which suggests that there's no obvious trend or seasonality left in the residuals.
+
+```{r}
+## Evaluating the model on test data and checking the accuracy of the same.
+store3_tforecast1 <- forecast(store3_tmodel1, h = length(data.test))
+store3_tforecast2 <- forecast(store3_tmodel2, h = length(data.test))
+store3_tsforecast1 <- forecast(store3_tsmodel1, h = length(data.test))
+store3_tsforecast2 <- forecast(store3_tsmodel2, h = length(data.test))
+
+print(accuracy(store3_tforecast1, data.test))
+print(accuracy(store3_tforecast2, data.test))
+print(accuracy(store3_tsforecast1, data.test))
+print(accuracy(store3_tsforecast2, data.test))
+```
+Observation:
+
+- The accuracy results show that model 1 has an MAE of 41.71.41, RMSE of 49.52 and MAPE of 14.76. On the other hand, model 2 has an MAE of 44.32, RMSE of 51.95 and MAPE of 16.05. Model ts1 has an MAE of 40.591, RMSE of 45.59 and MAPE of 15.29. Model ts2 has an MAE of 40.58, RMSE of 45.68 and MAPE of 15.25. The model with the lower MAE is typically considered better at forecasting with less error on average and so is the case with RMSE and MAPE. 
+- Since, out of the tsmodels, ts1 is better performing taking both the trend and seasonality into account, we can finally say that ts1 model is the best fitted on the test data. We will now do our forecasting based on ts1 mode and plot the time series graph for the same. The graph forecasts the amount of lettuce for the next two weeks and is highlighted by blue color.
+
+```{r}
+store3_arima_fm <- arima(data, order = c(0, 1, 1), seasonal = c(2,0,0))
+store3_final_forecast <- forecast(store3_arima_fm, h = 14)
+autoplot(store3_final_forecast) + geom_vline(xintercept = seq(1,18,1), color = "blue", linetype = "dashed")
+```
+
+```{r}
+#Getting the final forecast numbers for the next two week for store 3
+store3_final_forecast
+```
+
+# FORECASTING USING HOLT WINTERS MODEL (STORE 3)
+
+For the forecasting using holt winters method, we will use the ets function which automatically selects the best error, trend, and seasonality (ETS) model based on the data provided. I have provided a model call using the 'ZZZ' argument allowing it to automatically select the type of error, trend and seasonality.
+
+```{r}
+store3_holtwinter <- ets(data.train, model = "ZZZ")
+print(store3_holtwinter)
+```
+Observation:
+
+- The trained is an MNM model.
+- Alpha in this case 0.1333 is the smoothing parameter for the level of the series. It's relatively close to 0, which suggests that the model puts more weight on past observations rather than more recent ones when estimating the level.
+The AICc of the model is 989.26 and the BIC is 1010.56. 
+- Just like the ARIMA model, we will further check the residuals to ensure they are randomly scattered.
+
+
+```{r}
+checkresiduals(store3_holtwinter)
+```
+- Observation: As per the expectations, the residuals are randomly scattered around the 0 line.
+- We will proceed with forecasting the time series based on this best fitted ets model.
+
+```{r}
+store3_holtwinter_forecast1 <- forecast(store3_holtwinter, h = length(data.test))
+```
+
+```{r}
+print(accuracy(store3_holtwinter_forecast1, data.test))
+```
+
+- The accuracy results show that ets model has an MAE of 38.43, RMSE of 44.83 and MAPE of 13.92.
+
+```{r}
+# Training the selected model on the entire dataset
+store3_holt_final <- ets(data, model = "ZZZ")
+print(store3_holt_final)
+```
+
+Observation: The final trained model is an M,Ad,M model having AICc as 1236.196
+
+```{r}
+#Making sure that the residuals are radnomly scattered
+checkresiduals(store3_holt_final)
+```
+
+
+```{r}
+store3_hw_forecast <- forecast(store3_holt_final, h = 14)
+print(store3_hw_forecast)
+```
+
+```{r}
+autoplot(store3_hw_forecast) + geom_vline(xintercept = seq(1,20,1), color = "blue", linetype = "dashed")
+```
+
+### Comparision of the models:
+
+- According to the results of the arima model, the accuracy results showed that the final model selected for arima has an MAE of 40.591, RMSE of 45.59 and MAPE of 15.29. 
+- On the other hand, the ets model has an MAE of 38.43, RMSE of 44.83 and MAPE of 13.92.
+- RMSE measures the average magnitude of errors between predicted and actual values. For the comparision between the models, I will make the decision based on the fact that large errors are particularly undesirable in the use case i.e. lettuce consumption and RMSE can highlight these issues.
+- Since, the ets model has a lower RMSE i.e. 44.83 than the arima RMSE, i.e. 45.59, I will choose the ets model for this store for my forecast.
+
+#--------------------------------------------------------------------
+
+# FORECASTING USING ARIMA MODEL (STORE 4)
+
+I have plotted the overall time series chart to see the overall trend of the time series to detect if there are any significant patterns or not.
+
+```{r}
+data <- data.frame(
+  date = as.Date(store_4$date,  format = "%y-%m-%d"),
+  lettuce = store_4$total_value
+)
+breaks <- seq(min(data$date), max(data$date), by = "7 days")
+
+ggplot(data, aes(x = date, y = lettuce)) +
+  geom_line() +
+  labs(title = "Time Series Chart",
+       x = "Date",
+       y = "Lettuce Consumption")%>%
+  print() + 
+  geom_vline(xintercept = as.numeric(breaks), color = "blue", linetype = "dashed")
+
+```
+I decomposed the time series to understand its underlying components: trend, seasonality, and the remainder.
+
+```{r}
+data <- ts(data[,2], frequency = 7, start = c(1,1))
+data %>% stl(s.window = 'period') %>% autoplot
+```
+
+- After plotting the decomposition chart of the time series, it was found that the store 4 had NO seasonal factor, however, there seems to be some trend factor which can be determined by the length of the grey bar. 
+- To verify this, I ran the stationery tests such as the adf, pp and kpss test to check the d value. These tests will help determine the presence of unit roots, indicating whether differencing is needed to achieve stationarity. Moreover, to determine the number of first differences required, I ran the ndiffs and nsdiffs function. 
+- Before doing this, I segmented the data into training and test sets to ensure the model's robustness and generalizability. The data for every store has been divided into 80% for the training set and 20% into the test set.
+
+```{r}
+data.train <- window(data, end = c(12,7)) #store 4 (Again splitting by 80%)
+data.test <- window(data, start = c(13,1)) #store 4
+```
+
+```{r}
+adf.test(data.train)
+pp.test(data.train)
+kpss.test(data.train)
+ndiffs(data)
+nsdiffs(data)
+```
+- The ADF test checks for the presence of a unit root in the time series. A more negative test statistic suggests stronger evidence against the null hypothesis of a unit root (i.e., the series is non-stationary). Here, the test statistic is -4.1043, and the p-value is 0.01, which is less than a significance level of 0.05. This result indicates that we can reject the null hypothesis of a unit root, suggesting that the series is stationary.
+
+- The PP test adjusts for any serial correlation and heteroskedasticity in the series. Like the ADF test, a smaller p-value indicates evidence against the null hypothesis of a unit root. With a p-value of 0.01, this test also suggests that the series is stationary.
+
+- As for the KPSS test, it has a null hypothesis that is the opposite of the ADF and PP tests: it assumes the series is stationary. A high p-value (e.g., greater than 0.05 or 0.10) means there is not enough evidence to reject the null hypothesis, so the series can be considered stationary. The KPSS result with a p-value of 0.1 suggests stationarity, consistent with the ADF and PP test results.
+
+- As expected, the ndiffs result indicates that one trend difference is indeed necessary to make the series stationary on a trend basis. Even though the original series is stationary, it may still exhibit trend patterns that require differencing. Hence, we will apply the first order differencing now to eliminate trend factor.
+
+- The nsdiffs indicates that no seasonal differencing (0 differences) is necessary to make the series stationary for the ARIMA model. This aligns with the stationarity test results, suggesting that the series is already stationary.
+
+```{r}
+#First order differencing to eliminate trend.
+data.diff1 <- diff(data.train, lag = 1, differences = 1)
+autoplot(data.diff1)
+data.diff1 %>% stl(s.window = 'period') %>% autoplot
+```
+After differencing the trend factor, the grey bar is larger indicating that the it is of the least importance however, there seems to exist some variation in the model due to the seasonal factor now. To further check whether we need to do the differencing based on season, I confirmed by checking through the ndiffs and nsdiffs function again and both came out to be 0.
+
+```{r}
+adf.test(data.diff1)
+pp.test(data.diff1)
+kpss.test(data.diff1)
+ndiffs(data.diff1)
+nsdiffs(data.diff1)
+```
+
+Now let's plot the acf and pacf of the model
+
+```{r}
+acf(data.diff1, lag.max=23)
+```
+
+ACF - The acf plot suggest that there are significant lags at lag 1 and at lag 7. However, we should also check for any autocorrelation using the pacf function.
+
+```{r}
+pacf(data.diff1, lag.max = 23)
+```
+
+PACF - The PACF function suggests that there are significant lags at lag 0,4,5. However, to further decide on the selection of the model, we have to run the auto arima function to find the best fit model.
+
+```{r}
+data.sdiff1 <- diff(data.diff1, lag = 7, differences = 1)
+autoplot(data.sdiff1)
+data.sdiff1 %>% stl(s.window = 'period') %>% autoplot
+```
+Let's do the stationery tests again. Upon doing the tests again we can verify that we don't need any more differencing.
+
+```{r}
+adf.test(data.sdiff1)
+pp.test(data.sdiff1)
+kpss.test(data.sdiff1)
+ndiffs(data.sdiff1)
+nsdiffs(data.sdiff1)
+
+```
+
+Now let's plot the acf and pacf of the model
+
+```{r}
+acf(data.sdiff1, lag.max=23)
+```
+
+```{r}
+pacf(data.sdiff1, lag.max=23)
+```
+
+Now let's find the best model using the auto.arima function building models for both trend and with trend and season
+
+```{r}
+#Using the auto.arima function to find the best model
+auto.arima(data.train,d=1, trace = TRUE)
+```
+
+Interpreting the results of the auto ARIMA function:
+
+- According to the results obtained from auto.arima, the lowest AICc is 901.09 and sigma^2 as 2852. 
+- The (p,d,q) is (0,1,1) and (P,D,Q) is (1,0,0) with 7 lags. To further verify this, we will select one more candidate model which has the closest AICc i.e. 902.52 with (p,d,q) being (0,1,1) and (P,D,Q) being (0,0,1). We will further train the data and test its accuracy on the test data.
+- To further ensure that the model is the best selected one, we can also conduct the residual analysis to make sure the residuals are random.
+
+But before that let's build another model both with d=1 and D=1
+
+```{r}
+auto.arima(data.train,d=1,D=1, trace = TRUE)
+```
+
+Interpreting the results of the auto ARIMA function:
+
+- According to the results obtained from auto.arima, the lowest AICc is 830.2 and sigma^2 as 2733. 
+- The (p,d,q) is (0,1,1) and (P,D,Q) is (0,1,1) with 7 lags. To further verify this, we will select one more candidate model which has the closest AICc i.e. 831.86 with (p,d,q) being (1,1,1) and (P,D,Q) being (0,1,1). We will further train the data and test its accuracy on the test data.
+- To further ensure that the model is the best selected one, we can also conduct the residual analysis to make sure the residuals are random.
+
+```{r}
+store4_tmodel1 <- arima(data.train, order = c(0, 1, 1), seasonal = c(1,0,0))
+store4_tmodel2 <- arima(data.train, order = c(0, 1, 1), seasonal = c(0,0,1))
+store4_tsmodel1 <- arima(data.train, order = c(0, 1, 1), seasonal = c(0,1,1))
+store4_tsmodel2 <- arima(data.train, order = c(1, 1, 1), seasonal = c(0,1,1))
+```
+
+```{r}
+checkresiduals(store4_tmodel1)
+checkresiduals(store4_tmodel2)
+checkresiduals(store4_tsmodel1)
+checkresiduals(store4_tsmodel2)
+```
+Observation from the residual analysis:
+
+- The residuals for both the models appear to be randomly scattered around the zero line, which suggests that there's no obvious trend or seasonality left in the residuals.
+
+## Evaluating the model on test data and checking the accuracy of the same.
+
+```{r}
+## Evaluating the model on test data and checking the accuracy of the same.
+store4_tforecast1 <- forecast(store4_tmodel1, h = length(data.test))
+store4_tforecast2 <- forecast(store4_tmodel2, h = length(data.test))
+store4_tsforecast1 <- forecast(store4_tsmodel1, h = length(data.test))
+store4_tsforecast2 <- forecast(store4_tsmodel2, h = length(data.test))
+
+print(accuracy(store4_tforecast1, data.test))
+print(accuracy(store4_tforecast2, data.test))
+print(accuracy(store4_tsforecast1, data.test))
+print(accuracy(store4_tsforecast2, data.test))
+```
+Observation:
+
+- The accuracy results show that model 1 has an MAE of 40.82, RMSE of 64.38 and MAPE of 15.25. On the other hand, model 2 has an MAE of 42.62, RMSE of 66.14 and MAPE of 16.12. Model ts1 has an MAE of 38.59, RMSE of 59.80 and MAPE of 15.41. Model ts2 has an MAE of 38.76, RMSE of 59.96 and MAPE of 15.49. The model with the lower MAE is typically considered better at forecasting with less error on average and so is the case with RMSE and MAPE. 
+- Since, out of the tsmodels, ts1 is better performing taking both the trend and seasonality into account, we can finally say that ts1 model is the best fitted on the test data. We will now do our forecasting based on ts1 model and plot the time series graph for the same. The graph forecasts the amount of lettuce for the next two weeks and is highlighted by blue color.
+
+```{r}
+store4_arima_fm <- arima(data, order = c(0, 1, 1), seasonal = c(0,1,1))
+store4_final_forecast <- forecast(store4_arima_fm, h = 14)
+autoplot(store4_final_forecast) + geom_vline(xintercept = seq(1,18,1), color = "blue", linetype = "dashed")
+```
+
+```{r}
+#Getting the final forecast numbers for the next two week for store 4
+store4_final_forecast
+```
+
+# FORECASTING USING HOLT WINTERS MODEL (STORE 4)
+
+For the forecasting using holt winters method, we will use the ets function which automatically selects the best error, trend, and seasonality (ETS) model based on the data provided. I have provided a model call using the 'ZZZ' argument allowing it to automatically select the type of error, trend and seasonality.
+
+```{r}
+store4_holtwinter <- ets(data.train, model = "ZZZ")
+print(store4_holtwinter)
+```
+
+Observation:
+
+- The trained is an A,Ad,A model.
+- Alpha in this case 0.2517 is the smoothing parameter for the level of the series. It's relatively close to 0, which suggests that the model puts more weight on past observations rather than more recent ones when estimating the level.
+The AICc of the model is 1043.152 and the BIC is 1069.552. 
+- Just like the ARIMA model, we will further check the residuals to ensure they are randomly scattered.
+
+
+```{r}
+checkresiduals(store4_holtwinter)
+```
+- Observation: As per the expectations, the residuals are randomly scattered around the 0 line.
+- We will proceed with forecasting the time series based on this best fitted ets model.
+
+```{r}
+store4_holtwinter_forecast1 <- forecast(store4_holtwinter, h = length(data.test))
+```
+
+```{r}
+print(accuracy(store4_holtwinter_forecast1, data.test))
+```
+
+- The accuracy results show that ets model has an MAE of 42.88, RMSE of 64.81 and MAPE of 17.09.
+
+
+```{r}
+# Training the selected model on the entire dataset
+store4_holt_final <- ets(data, model = "ZZZ")
+print(store4_holt_final)
+```
+Observation: The final trained model is an A,Ad,A model having AICc as 1181.86
+
+```{r}
+#Making sure that the residuals are radnomly scattered
+checkresiduals(store4_holt_final)
+```
+
+
+```{r}
+store4_hw_forecast <- forecast(store4_holt_final, h = 14)
+print(store4_hw_forecast)
+```
+
+```{r}
+autoplot(store4_hw_forecast) + geom_vline(xintercept = seq(1,20,1), color = "blue", linetype = "dashed")
+```
+### Comparision of the models:
+
+- According to the results of the arima model, the accuracy results showed that the final model selected for arima has an MAE of 38.59, RMSE of 59.80 and MAPE of 15.41.
+- On the other hand, the ets model has an MAE of 42.88, RMSE of 64.81 and MAPE of 17.09.
+- RMSE measures the average magnitude of errors between predicted and actual values. For the comparision between the models, I will make the decision based on the fact that large errors are particularly undesirable in the use case i.e. lettuce consumption and RMSE can highlight these issues.
+- Since, the arima model has a lower RMSE i.e. 59.8 than the ets RMSE, i.e. 64.81, I will choose the arima model for this store for my forecast.
+
+
